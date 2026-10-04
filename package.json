@@ -1,0 +1,17 @@
+{
+  "name": "ai-content-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "公众号 + 小红书 AI 图文创作工作流（Claude Code + MCP）",
+  "type": "module",
+  "scripts": {
+    "cards": "node scripts/render-cards.mjs",
+    "check": "node scripts/check.mjs",
+    "new": "node scripts/new-post.mjs",
+    "demo": "node scripts/render-cards.mjs examples/demo/cards.md && node scripts/check.mjs examples/demo/note.md"
+  },
+  "dependencies": {
+    "marked": "^14.1.4",
+    "playwright": "1.56.1"
+  }
+}

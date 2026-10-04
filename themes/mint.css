@@ -1,0 +1,3 @@
+/* 极简蓝白文档：白底 + 蓝色强调，适合教程步骤、职场经验、知识科普 */
+:root { --bg: #ffffff; --fg: #1d2433; --muted: #7b8496; --accent: #2f6bff; --mark: #d6e3ff; --panel: #f2f6ff; --line: #e3e8f2; }
+.cover { background: linear-gradient(180deg, #eef3ff 0%, #ffffff 60%); }

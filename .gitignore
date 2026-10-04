@@ -1,0 +1,6 @@
+node_modules/
+.env
+# 生成的图片按需提交；默认忽略正式内容目录里的产物
+content/**/cards/
+content/**/images/
+tools/

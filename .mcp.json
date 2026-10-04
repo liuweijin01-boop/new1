@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "wenyan-mcp": {
+      "command": "wenyan-mcp",
+      "env": {
+        "WECHAT_APP_ID": "${WECHAT_APP_ID}",
+        "WECHAT_APP_SECRET": "${WECHAT_APP_SECRET}"
+      }
+    },
+    "xiaohongshu-mcp": {
+      "type": "http",
+      "url": "http://localhost:18060/mcp"
+    }
+  }
+}
