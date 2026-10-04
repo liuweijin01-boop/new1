@@ -91,6 +91,7 @@ themes/                   卡片主题：cream 奶油、ink 深色科技、mint 
 content/                  你的每一篇内容
 docs/选型调研.md           GitHub 开源方案对比
 docs/内容定位分析.md       适合做什么内容的分析框架
+docs/账号定位方案.md       针对记者 / 编导 / AI 短片创作者的定位、选题与变现方案
 ```
 
 ## 可选组件
