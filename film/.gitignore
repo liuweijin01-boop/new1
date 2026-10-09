@@ -1,0 +1,4 @@
+out/seg/
+out/video.mp4
+out/audio.wav
+out/*.log
