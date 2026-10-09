@@ -16,5 +16,6 @@ for p in "${pids[@]}"; do wait "$p"; done
 : > out/seg/list.txt
 for i in $(seq 0 $((N - 1))); do echo "file 'seg$i.mp4'" >> out/seg/list.txt; done
 ffmpeg -y -loglevel error -f concat -safe 0 -i out/seg/list.txt -c copy out/video.mp4
-ffmpeg -y -loglevel error -i out/video.mp4 -i out/audio.wav -c:v copy -c:a aac -b:a 192k -shortest -movflags +faststart "out/光年之外.mp4"
+ffmpeg -y -loglevel error -i out/video.mp4 -i out/audio.wav -c:v libx264 -preset slow -b:v 4300k -maxrate 6000k -bufsize 9000k -pix_fmt yuv420p \
+  -c:a aac -b:a 192k -movflags +faststart -shortest "out/光年之外.mp4"
 ffprobe -v error -show_entries format=duration,size -of default=nw=1 "out/光年之外.mp4"
