@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>射击打靶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #1b2430; overflow: hidden; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; color: #fff; user-select: none; }
+  canvas { display: block; cursor: none; touch-action: none; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 12px 18px; font-size: 18px; pointer-events: none; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+  #hud span b { color: #ffd54a; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(10,15,22,.78); }
+  #overlay.hidden { display: none; }
+  .panel { text-align: center; padding: 32px 40px; background: #26313f; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.5); max-width: 90vw; }
+  .panel h1 { font-size: 40px; margin-bottom: 12px; color: #ffd54a; }
+  .panel p { margin: 8px 0; color: #c9d4e0; line-height: 1.6; }
+  .panel .stats { font-size: 20px; color: #fff; margin: 16px 0; }
+  .modes { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+  button { font-size: 18px; padding: 10px 22px; border: none; border-radius: 10px; background: #e5484d; color: #fff; cursor: pointer; transition: transform .1s; }
+  button:hover { transform: scale(1.06); }
+  button.alt { background: #3a7bd5; }
+  button.alt2 { background: #2f9e44; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <span>得分 <b id="score">0</b></span>
+  <span>连击 <b id="combo">0</b></span>
+  <span>弹药 <b id="ammo">8</b>/8</span>
+  <span>时间 <b id="time">60</b>s</span>
+</div>
+<div id="overlay">
+  <div class="panel" id="panel"></div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const overlay = $('overlay'), panel = $('panel');
+
+  const MAG_SIZE = 8, RELOAD_MS = 900, GAME_SECONDS = 60;
+  // 靶环：由外到内，分值递增
+  const RINGS = [
+    { r: 1.0, color: '#ffffff', pts: 1 },
+    { r: 0.8, color: '#222222', pts: 3 },
+    { r: 0.6, color: '#3a7bd5', pts: 5 },
+    { r: 0.4, color: '#e5484d', pts: 8 },
+    { r: 0.2, color: '#ffd54a', pts: 10 },
+  ];
+  const MODES = {
+    easy:   { name: '简单', spawnMs: 1400, maxTargets: 3, size: [45, 60], speed: [0, 60],   life: 4000 },
+    normal: { name: '普通', spawnMs: 1000, maxTargets: 4, size: [32, 48], speed: [40, 130], life: 3000 },
+    hard:   { name: '困难', spawnMs: 700,  maxTargets: 5, size: [22, 36], speed: [90, 220], life: 2200 },
+  };
+
+  let W, H, dpr;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- 音效（WebAudio 合成，无需素材） ----------
+  let audio;
+  function sound(type) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const t = audio.currentTime;
+      const g = audio.createGain(); g.connect(audio.destination);
+      if (type === 'shot') {
+        const buf = audio.createBuffer(1, audio.sampleRate * 0.15, audio.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+        const src = audio.createBufferSource(); src.buffer = buf; src.connect(g);
+        g.gain.value = 0.35; src.start(t);
+      } else {
+        const o = audio.createOscillator(); o.connect(g);
+        const cfg = { hit: [880, 1320, 0.12, 'triangle'], bull: [1200, 2000, 0.2, 'square'],
+                      empty: [200, 150, 0.06, 'square'], reload: [300, 600, 0.15, 'sawtooth'] }[type];
+        o.type = cfg[3];
+        o.frequency.setValueAtTime(cfg[0], t);
+        o.frequency.linearRampToValueAtTime(cfg[1], t + cfg[2]);
+        g.gain.setValueAtTime(0.12, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + cfg[2]);
+        o.start(t); o.stop(t + cfg[2]);
+      }
+    } catch (e) { /* 音频不可用时静默 */ }
+  }
+
+  // ---------- 游戏状态 ----------
+  const rand = (a, b) => a + Math.random() * (b - a);
+  let state = 'menu', mode = MODES.normal, modeKey = 'normal';
+  let targets, holes, particles, popups;
+  let score, combo, maxCombo, shots, hits, ammo, reloading, reloadEnd, timeLeft, spawnTimer, shake;
+  const mouse = { x: W / 2, y: H / 2 };
+
+  function best(key) { try { return +localStorage.getItem('target-best-' + key) || 0; } catch (e) { return 0; } }
+  function saveBest(key, v) { try { localStorage.setItem('target-best-' + key, v); } catch (e) {} }
+
+  function start(key) {
+    modeKey = key; mode = MODES[key];
+    targets = []; holes = []; particles = []; popups = [];
+    score = combo = maxCombo = shots = hits = 0;
+    ammo = MAG_SIZE; reloading = false; timeLeft = GAME_SECONDS; spawnTimer = 0; shake = 0;
+    state = 'play';
+    overlay.classList.add('hidden');
+    updateHud();
+  }
+
+  function spawnTarget() {
+    const size = rand(...mode.size);
+    const speed = rand(...mode.speed);
+    const ang = rand(0, Math.PI * 2);
+    // 少数金色奖励靶：更小、更快、得分翻倍
+    const golden = Math.random() < 0.1;
+    targets.push({
+      x: rand(size + 20, W - size - 20),
+      y: rand(size + 70, H - size - 20),
+      r: golden ? size * 0.7 : size,
+      vx: Math.cos(ang) * speed * (golden ? 1.5 : 1),
+      vy: Math.sin(ang) * speed * (golden ? 1.5 : 1),
+      life: mode.life, age: 0, golden, scale: 0,
+    });
+  }
+
+  function reload() {
+    if (reloading || ammo === MAG_SIZE || state !== 'play') return;
+    reloading = true; reloadEnd = performance.now() + RELOAD_MS;
+    sound('reload');
+  }
+
+  function shoot(x, y) {
+    if (state !== 'play') return;
+    if (reloading) return;
+    if (ammo <= 0) { sound('empty'); reload(); return; }
+    ammo--; shots++; shake = 6;
+    sound('shot');
+
+    // 从最上层（后生成）的靶子开始判定
+    let hitSomething = false;
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      const d = Math.hypot(x - t.x, y - t.y) / (t.r * t.scale);
+      if (d > 1) continue;
+      let ring = RINGS[0];
+      for (const rg of RINGS) if (d <= rg.r) ring = rg;
+      combo++; maxCombo = Math.max(maxCombo, combo); hits++;
+      const mult = 1 + Math.floor(combo / 5) * 0.5; // 每 5 连击倍率 +0.5
+      const pts = Math.round(ring.pts * mult * (t.golden ? 2 : 1));
+      score += pts;
+      const bull = ring.pts === 10;
+      sound(bull ? 'bull' : 'hit');
+      popups.push({ x, y, text: (bull ? '靶心! ' : '') + '+' + pts, color: bull ? '#ffd54a' : '#fff', age: 0 });
+      burst(t.x, t.y, t.golden ? '#ffd54a' : ring.color, bull ? 30 : 16);
+      targets.splice(i, 1);
+      hitSomething = true;
+      break;
+    }
+    if (!hitSomething) {
+      combo = 0;
+      holes.push({ x, y, age: 0 });
+      if (holes.length > 40) holes.shift();
+      popups.push({ x, y, text: '脱靶', color: '#ff8080', age: 0 });
+    }
+    if (ammo === 0) reload();
+    updateHud();
+  }
+
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), s = rand(80, 320);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.4, 0.8), age: 0, color, size: rand(2, 5) });
+    }
+  }
+
+  function updateHud() {
+    $('score').textContent = score;
+    $('combo').textContent = combo;
+    $('ammo').textContent = reloading ? '换弹中' : ammo;
+    $('time').textContent = Math.ceil(timeLeft);
+  }
+
+  function endGame() {
+    state = 'over';
+    const prev = best(modeKey), isNew = score > prev;
+    if (isNew) saveBest(modeKey, score);
+    const acc = shots ? Math.round(hits / shots * 100) : 0;
+    panel.innerHTML = `
+      <h1>${isNew ? '🏆 新纪录！' : '时间到！'}</h1>
+      <div class="stats">
+        <p>模式：${mode.name}</p>
+        <p>得分：<b style="color:#ffd54a">${score}</b>　最高：${Math.max(prev, score)}</p>
+        <p>命中率：${acc}%（${hits}/${shots}）　最大连击：${maxCombo}</p>
+      </div>
+      ${modeButtons()}`;
+    bindModeButtons();
+    overlay.classList.remove('hidden');
+  }
+
+  function modeButtons() {
+    return `<div class="modes">
+      <button class="alt2" data-mode="easy">简单</button>
+      <button class="alt" data-mode="normal">普通</button>
+      <button data-mode="hard">困难</button>
+    </div>`;
+  }
+  function bindModeButtons() {
+    panel.querySelectorAll('button[data-mode]').forEach(b =>
+      b.addEventListener('click', e => { e.stopPropagation(); start(b.dataset.mode); }));
+  }
+
+  function showMenu() {
+    panel.innerHTML = `
+      <h1>🎯 射击打靶</h1>
+      <p>点击鼠标（或触摸屏幕）射击靶子，越靠近靶心分越高</p>
+      <p>白 1 · 黑 3 · 蓝 5 · 红 8 · 黄心 10　金色靶双倍得分</p>
+      <p>每 5 连击倍率 +0.5，脱靶会中断连击</p>
+      <p>弹匣 ${MAG_SIZE} 发，按 <b>R</b> 或 <b>右键</b> 换弹，限时 ${GAME_SECONDS} 秒</p>
+      <p style="color:#8fa3b8">最高分　简单 ${best('easy')} · 普通 ${best('normal')} · 困难 ${best('hard')}</p>
+      ${modeButtons()}`;
+    bindModeButtons();
+  }
+
+  // ---------- 输入 ----------
+  canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  canvas.addEventListener('mousedown', e => {
+    if (e.button === 0) shoot(e.clientX, e.clientY);
+    else if (e.button === 2) reload();
+  });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    mouse.x = t.clientX; mouse.y = t.clientY;
+    // 双指触摸换弹
+    if (e.touches.length >= 2) reload(); else shoot(t.clientX, t.clientY);
+  }, { passive: false });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'r' || e.key === 'R') reload();
+    if (e.key === 'Escape' && state === 'play') endGame();
+  });
+
+  // ---------- 主循环 ----------
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    if (state === 'play') update(dt, now);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt, now) {
+    timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; updateHud(); endGame(); return; }
+
+    if (reloading && now >= reloadEnd) { reloading = false; ammo = MAG_SIZE; }
+
+    spawnTimer -= dt * 1000;
+    if (spawnTimer <= 0 && targets.length < mode.maxTargets) {
+      spawnTarget();
+      // 后期刷靶更快
+      spawnTimer = mode.spawnMs * (0.6 + 0.4 * timeLeft / GAME_SECONDS);
+    }
+
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      t.age += dt * 1000;
+      t.scale = Math.min(1, t.scale + dt * 6);
+      t.x += t.vx * dt; t.y += t.vy * dt;
+      if (t.x < t.r || t.x > W - t.r) { t.vx *= -1; t.x = Math.max(t.r, Math.min(W - t.r, t.x)); }
+      if (t.y < t.r + 50 || t.y > H - t.r) { t.vy *= -1; t.y = Math.max(t.r + 50, Math.min(H - t.r, t.y)); }
+      if (t.age > t.life) { targets.splice(i, 1); combo = 0; }
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt;
+      if (p.age > p.life) particles.splice(i, 1);
+    }
+    for (let i = popups.length - 1; i >= 0; i--) {
+      popups[i].age += dt;
+      if (popups[i].age > 0.8) popups.splice(i, 1);
+    }
+    holes.forEach(h => h.age += dt);
+    holes = holes.filter(h => h.age < 6);
+    shake = Math.max(0, shake - dt * 40);
+    updateHud();
+  }
+
+  function drawBackground() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#2b3a4d'); g.addColorStop(1, '#14202c');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+
+  function drawTarget(t) {
+    const r = t.r * t.scale;
+    const remain = 1 - t.age / t.life;
+    ctx.save();
+    // 即将消失时闪烁
+    if (remain < 0.25 && Math.floor(t.age / 100) % 2) ctx.globalAlpha = 0.45;
+    ctx.shadowColor = t.golden ? '#ffd54a' : 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = t.golden ? 25 : 10;
+    RINGS.forEach((rg, i) => {
+      ctx.beginPath(); ctx.arc(t.x, t.y, r * rg.r, 0, Math.PI * 2);
+      ctx.fillStyle = t.golden && i === 0 ? '#fff3c4' : rg.color;
+      ctx.fill();
+      if (i === 0) ctx.shadowBlur = 0;
+      ctx.strokeStyle = i === 1 ? '#555' : '#222'; ctx.lineWidth = 1; ctx.stroke();
+    });
+    // 剩余时间环
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, r + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remain);
+    ctx.strokeStyle = t.golden ? '#ffd54a' : 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawCrosshair() {
+    const { x, y } = mouse;
+    const gap = reloading ? 14 : 6, len = 12;
+    ctx.save();
+    ctx.strokeStyle = reloading ? '#ffb74a' : '#4aff8a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - gap - len, y); ctx.lineTo(x - gap, y);
+    ctx.moveTo(x + gap, y); ctx.lineTo(x + gap + len, y);
+    ctx.moveTo(x, y - gap - len); ctx.lineTo(x, y - gap);
+    ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + len);
+    ctx.stroke();
+    ctx.fillStyle = '#ff3b3b'; ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+    if (reloading) {
+      const p = 1 - (reloadEnd - performance.now()) / RELOAD_MS;
+      ctx.strokeStyle = '#ffb74a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, 24, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawAmmo() {
+    for (let i = 0; i < MAG_SIZE; i++) {
+      const x = W - 24 - i * 14, y = H - 40;
+      ctx.fillStyle = i < ammo && !reloading ? '#d4a017' : 'rgba(255,255,255,0.15)';
+      ctx.fillRect(x, y, 8, 24);
+      ctx.beginPath(); ctx.arc(x + 4, y, 4, Math.PI, 0); ctx.fill();
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+    drawBackground();
+    if (state !== 'menu') {
+      holes.forEach(h => {
+        ctx.globalAlpha = Math.max(0, 1 - h.age / 6);
+        ctx.fillStyle = '#0a0a0a'; ctx.beginPath(); ctx.arc(h.x, h.y, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+      targets.forEach(drawTarget);
+      particles.forEach(p => {
+        ctx.globalAlpha = 1 - p.age / p.life;
+        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size);
+      });
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'center'; ctx.font = 'bold 22px sans-serif';
+      popups.forEach(p => {
+        ctx.globalAlpha = 1 - p.age / 0.8;
+        ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y - 20 - p.age * 50);
+      });
+      ctx.globalAlpha = 1;
+      if (combo >= 5) {
+        ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = '#ffd54a';
+        ctx.fillText(`${combo} 连击  x${1 + Math.floor(combo / 5) * 0.5}`, W / 2, 80);
+      }
+      drawAmmo();
+    }
+    ctx.restore();
+    drawCrosshair();
+  }
+
+  showMenu();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
