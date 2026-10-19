@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f7cff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="错题本">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>我的错题本</title>
+<style>
+:root{
+  --bg:#f4f6fb; --card:#fff; --text:#1f2430; --muted:#7a8296; --line:#e6e9f0;
+  --primary:#4f7cff; --primary-soft:#e8eeff; --danger:#e5484d; --ok:#2fa36b; --ok-soft:#e3f5ec;
+  --radius:14px; --shadow:0 2px 10px rgba(30,40,80,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#12141a;--card:#1c1f27;--text:#e9ecf3;--muted:#9097a8;--line:#2a2e39;--primary-soft:#26304d;--ok-soft:#1d3329;}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+textarea{resize:vertical;min-height:70px}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 6px}
+header h1{margin:0 0 8px;font-size:22px;display:flex;align-items:center;justify-content:space-between}
+header h1>span:last-child{display:flex;gap:2px}
+.icon-btn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:20px}
+.icon-btn:active{background:var(--line)}
+.tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:6px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:14px;white-space:nowrap}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.chip.sm{padding:4px 11px;font-size:13px}
+.chip.sel{background:var(--primary-soft);border-color:var(--primary);color:var(--primary)}
+main{padding:4px 16px calc(110px + env(safe-area-inset-bottom))}
+.summary{display:flex;gap:10px;margin:6px 0 12px}
+.summary div{flex:1;background:var(--card);border-radius:var(--radius);padding:10px;text-align:center;box-shadow:var(--shadow)}
+.summary b{display:block;font-size:20px}
+.summary span{font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);text-align:left;display:flex;flex-direction:column}
+.card .img{aspect-ratio:4/3;background:var(--line) center/cover no-repeat;position:relative}
+.badge{position:absolute;top:6px;left:6px;font-size:11px;padding:2px 8px;border-radius:999px;color:#fff;background:rgba(0,0,0,.55)}
+.badge.ok{left:auto;right:6px;background:var(--ok)}
+.card .meta{padding:8px 10px;font-size:13px}
+.card .meta .reason{color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.empty{text-align:center;color:var(--muted);padding:60px 20px}
+.empty .big{font-size:48px}
+.fab-bar{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:12px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 35%)}
+.fab{background:var(--primary);color:#fff;border-radius:999px;padding:14px 26px;font-size:17px;font-weight:600;box-shadow:0 6px 18px rgba(79,124,255,.4);display:flex;align-items:center;gap:8px}
+.fab.ghost{background:var(--card);color:var(--primary);box-shadow:var(--shadow);padding:14px 20px}
+/* sheet */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:none;align-items:flex-end;justify-content:center}
+.mask.show{display:flex}
+.sheet{background:var(--card);width:100%;max-width:640px;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom));animation:up .22s ease}
+@keyframes up{from{transform:translateY(40px);opacity:.5}}
+.sheet h2{margin:0 0 12px;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+.field{margin-bottom:14px}
+.field>label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.wrap{display:flex;flex-wrap:wrap;gap:8px}
+.preview{width:100%;max-height:42vh;object-fit:contain;border-radius:12px;background:var(--bg);display:block}
+.thumb-row{display:flex;gap:8px;align-items:center}
+.thumb-row img{width:72px;height:72px;object-fit:cover;border-radius:10px}
+.btn{padding:12px 16px;border-radius:12px;background:var(--bg);font-weight:600;text-align:center}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.danger{color:var(--danger)}
+.btn.ok{background:var(--ok-soft);color:var(--ok)}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+.detail-img{width:100%;border-radius:12px;display:block;margin-bottom:10px}
+.kv{background:var(--bg);border-radius:12px;padding:10px 12px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word}
+.kv small{display:block;color:var(--muted);font-weight:600;margin-bottom:2px}
+.list-item{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.list-item .grow{flex:1}
+.bar{height:8px;border-radius:4px;background:var(--primary);min-width:2px}
+.toast{position:fixed;left:50%;top:30%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:10px 18px;border-radius:10px;z-index:50;display:none}
+.reveal{border:2px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--muted);width:100%}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>
+    <span>📒 我的错题本</span>
+    <span>
+      <button class="icon-btn" id="btnStats" title="统计">📊</button>
+      <button class="icon-btn" id="btnSettings" title="设置">⚙️</button>
+    </span>
+  </h1>
+  <div class="tabs" id="subjectTabs"></div>
+  <div class="tabs" id="categoryTabs"></div>
+</header>
+
+<main>
+  <div class="summary" id="summary"></div>
+  <div class="tabs" style="margin-bottom:10px">
+    <button class="chip sm" data-status="todo">未掌握</button>
+    <button class="chip sm" data-status="all">全部</button>
+    <button class="chip sm" data-status="done">已掌握</button>
+  </div>
+  <div class="grid" id="list"></div>
+</main>
+
+<div class="fab-bar">
+  <button class="fab ghost" id="btnReview">🔁 复习</button>
+  <button class="fab" id="btnCamera">📷 拍错题</button>
+</div>
+
+<!-- hidden file inputs -->
+<input type="file" id="fileQuestion" accept="image/*" capture="environment" class="hide">
+<input type="file" id="fileAnswer" accept="image/*" capture="environment" class="hide">
+<input type="file" id="fileImport" accept="application/json,.json" class="hide">
+
+<div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ================= 默认配置 ================= */
+const DEFAULT_CATEGORIES = ['课本', '练习册', '作业', '试卷', '其他'];
+const DEFAULT_SETTINGS = {
+  subjects: [
+    { id: 'chinese', name: '语文', categories: [...DEFAULT_CATEGORIES] },
+    { id: 'math', name: '数学', categories: [...DEFAULT_CATEGORIES] },
+    { id: 'english', name: '英语', categories: [...DEFAULT_CATEGORIES] },
+    { id: 'physics', name: '物理', categories: [...DEFAULT_CATEGORIES] },
+    { id: 'chemistry', name: '化学', categories: [...DEFAULT_CATEGORIES] },
+  ],
+  reasons: ['粗心大意', '审题不清', '计算错误', '概念不清', '公式记错', '方法不会', '书写不规范', '时间不够'],
+};
+
+/* ================= IndexedDB ================= */
+const DB_NAME = 'mistake-book', DB_VER = 1;
+let db;
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains('questions')) d.createObjectStore('questions', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function tx(store, mode, fn) {
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(store, mode);
+    const s = t.objectStore(store);
+    const r = fn(s);
+    t.oncomplete = () => resolve(r && r.result);
+    t.onerror = () => reject(t.error);
+  });
+}
+const dbAll = () => tx('questions', 'readonly', s => s.getAll());
+const dbPut = q => tx('questions', 'readwrite', s => s.put(q));
+const dbDel = id => tx('questions', 'readwrite', s => s.delete(id));
+const kvGet = k => tx('kv', 'readonly', s => s.get(k));
+const kvSet = (k, v) => tx('kv', 'readwrite', s => s.put(v, k));
+
+/* ================= 状态 ================= */
+const state = {
+  settings: null,
+  questions: [],
+  subject: 'all',
+  category: 'all',
+  status: 'todo',
+};
+const urlCache = new Map();
+function blobUrl(blob, key) {
+  if (!blob) return '';
+  if (!urlCache.has(key)) urlCache.set(key, URL.createObjectURL(blob));
+  return urlCache.get(key);
+}
+function dropUrl(key) {
+  if (urlCache.has(key)) { URL.revokeObjectURL(urlCache.get(key)); urlCache.delete(key); }
+}
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const subjectName = id => state.settings.subjects.find(s => s.id === id)?.name || '未分类';
+const fmtDate = t => { const d = new Date(t); return `${d.getMonth() + 1}月${d.getDate()}日`; };
+function toast(msg) {
+  const el = $('#toast'); el.textContent = msg; el.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = 'none', 1600);
+}
+
+// 压缩照片：最长边 1600px，JPEG 0.82，一张一般 200~400KB
+function compressImage(file, maxSide = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(b => b ? resolve(b) : reject(new Error('图片处理失败')), 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('无法读取图片')); };
+    img.src = url;
+  });
+}
+const blobToDataURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+const dataURLToBlob = async d => (await fetch(d)).blob();
+
+function pickFile(input) {
+  return new Promise(resolve => {
+    input.value = '';
+    input.onchange = () => resolve(input.files[0] || null);
+    input.click();
+  });
+}
+
+/* ================= 弹层 ================= */
+function openSheet(html) { $('#sheet').innerHTML = html; $('#mask').classList.add('show'); $('#sheet').scrollTop = 0; }
+function closeSheet() { $('#mask').classList.remove('show'); $('#sheet').innerHTML = ''; }
+$('#mask').addEventListener('click', e => { if (e.target.id === 'mask') closeSheet(); });
+
+/* ================= 渲染主界面 ================= */
+function filtered() {
+  return state.questions
+    .filter(q => state.subject === 'all' || q.subjectId === state.subject)
+    .filter(q => state.category === 'all' || q.category === state.category)
+    .filter(q => state.status === 'all' || (state.status === 'done' ? q.mastered : !q.mastered))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function render() {
+  const { subjects } = state.settings;
+  $('#subjectTabs').innerHTML =
+    `<button class="chip ${state.subject === 'all' ? 'on' : ''}" data-subject="all">全部科目</button>` +
+    subjects.map(s => `<button class="chip ${state.subject === s.id ? 'on' : ''}" data-subject="${s.id}">${esc(s.name)}</button>`).join('');
+
+  const cats = state.subject === 'all'
+    ? [...new Set(subjects.flatMap(s => s.categories))]
+    : subjects.find(s => s.id === state.subject)?.categories || [];
+  if (state.category !== 'all' && !cats.includes(state.category)) state.category = 'all';
+  $('#categoryTabs').innerHTML =
+    `<button class="chip sm ${state.category === 'all' ? 'sel' : ''}" data-category="all">全部类别</button>` +
+    cats.map(c => `<button class="chip sm ${state.category === c ? 'sel' : ''}" data-category="${esc(c)}">${esc(c)}</button>`).join('');
+
+  document.querySelectorAll('[data-status]').forEach(b => b.classList.toggle('sel', b.dataset.status === state.status));
+
+  const inScope = state.questions.filter(q => (state.subject === 'all' || q.subjectId === state.subject));
+  const mastered = inScope.filter(q => q.mastered).length;
+  $('#summary').innerHTML = `
+    <div><b>${inScope.length}</b><span>错题总数</span></div>
+    <div><b>${inScope.length - mastered}</b><span>待攻克</span></div>
+    <div><b>${mastered}</b><span>已掌握</span></div>`;
+
+  const list = filtered();
+  $('#list').innerHTML = list.length ? list.map(q => `
+    <button class="card" data-open="${q.id}">
+      <div class="img" style="background-image:url('${blobUrl(q.image, q.id)}')">
+        <span class="badge">${esc(subjectName(q.subjectId))} · ${esc(q.category)}</span>
+        ${q.mastered ? '<span class="badge ok">✓ 已掌握</span>' : ''}
+      </div>
+      <div class="meta">
+        <div class="reason">${esc([...(q.reasons || []), q.note].filter(Boolean).join('，') || '（未填写错因）')}</div>
+        <div style="color:var(--muted);font-size:12px">${fmtDate(q.createdAt)} · 复习 ${q.reviewCount || 0} 次</div>
+      </div>
+    </button>`).join('')
+    : `<div class="empty" style="grid-column:1/-1"><div class="big">📷</div>这里还没有错题<br>点下方「拍错题」开始记录吧</div>`;
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-subject],[data-category],[data-status],[data-open]');
+  if (!t) return;
+  if (t.dataset.subject) { state.subject = t.dataset.subject; state.category = 'all'; render(); }
+  else if (t.dataset.category) { state.category = t.dataset.category; render(); }
+  else if (t.dataset.status) { state.status = t.dataset.status; render(); }
+  else if (t.dataset.open) showDetail(t.dataset.open);
+});
+
+/* ================= 录入 / 编辑 ================= */
+let draft = null; // 正在编辑的错题
+
+$('#btnCamera').onclick = async () => {
+  const file = await pickFile($('#fileQuestion'));
+  if (!file) return;
+  try {
+    const blob = await compressImage(file);
+    const subjectId = state.subject !== 'all' ? state.subject : state.settings.subjects[0]?.id;
+    const cats = state.settings.subjects.find(s => s.id === subjectId)?.categories || [];
+    draft = {
+      id: uid(), isNew: true, image: blob, answerImage: null, subjectId,
+      category: state.category !== 'all' && cats.includes(state.category) ? state.category : cats[0] || '其他',
+      answer: '', myAnswer: '', reasons: [], note: '', knowledge: '',
+      createdAt: Date.now(), reviewCount: 0, lastReviewed: null, mastered: false,
+    };
+    showEditor();
+  } catch (err) { toast(err.message); }
+};
+
+function showEditor() {
+  const d = draft;
+  const subj = state.settings.subjects.find(s => s.id === d.subjectId);
+  const imgUrl = URL.createObjectURL(d.image);
+  const ansUrl = d.answerImage ? URL.createObjectURL(d.answerImage) : '';
+  openSheet(`
+    <h2>${d.isNew ? '记录错题' : '编辑错题'}<button class="icon-btn" id="edClose">✕</button></h2>
+    <div class="field"><img class="preview" src="${imgUrl}"><button class="btn" style="width:100%;margin-top:8px" id="edRetake">🔄 重拍题目</button></div>
+
+    <div class="field"><label>科目</label><div class="wrap" id="edSubjects">
+      ${state.settings.subjects.map(s => `<button class="chip sm ${s.id === d.subjectId ? 'sel' : ''}" data-v="${s.id}">${esc(s.name)}</button>`).join('')}
+    </div></div>
+
+    <div class="field"><label>来源类别</label><div class="wrap" id="edCats">
+      ${(subj?.categories || []).map(c => `<button class="chip sm ${c === d.category ? 'sel' : ''}" data-v="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div></div>
+
+    <div class="field"><label>正确答案</label>
+      <textarea id="edAnswer" placeholder="写下正确答案或解题过程">${esc(d.answer)}</textarea>
+      <div class="thumb-row" style="margin-top:8px">
+        ${ansUrl ? `<img src="${ansUrl}"><button class="btn danger" id="edAnsDel">删除答案图</button>` : ''}
+        <button class="btn" id="edAnsPhoto">📷 ${ansUrl ? '重拍' : '拍'}答案</button>
+      </div>
+    </div>
+
+    <div class="field"><label>我当时的答案（可选）</label>
+      <input id="edMy" placeholder="例如：选了 B" value="${esc(d.myAnswer)}">
+    </div>
+
+    <div class="field"><label>做错的原因（可多选）</label><div class="wrap" id="edReasons">
+      ${state.settings.reasons.map(r => `<button class="chip sm ${d.reasons.includes(r) ? 'sel' : ''}" data-v="${esc(r)}">${esc(r)}</button>`).join('')}
+    </div>
+      <textarea id="edNote" style="margin-top:8px" placeholder="具体说说哪里错了、下次要注意什么">${esc(d.note)}</textarea>
+    </div>
+
+    <div class="field"><label>知识点（可选）</label>
+      <input id="edKnow" placeholder="例如：一元一次方程、过去进行时" value="${esc(d.knowledge)}">
+    </div>
+
+    <button class="btn primary" style="width:100%;padding:14px" id="edSave">保存</button>
+  `);
+
+  const sync = () => {
+    d.answer = $('#edAnswer').value.trim();
+    d.myAnswer = $('#edMy').value.trim();
+    d.note = $('#edNote').value.trim();
+    d.knowledge = $('#edKnow').value.trim();
+  };
+  const cleanup = () => { URL.revokeObjectURL(imgUrl); if (ansUrl) URL.revokeObjectURL(ansUrl); };
+
+  $('#edClose').onclick = () => { cleanup(); closeSheet(); draft = null; };
+  $('#edRetake').onclick = async () => {
+    sync();
+    const f = await pickFile($('#fileQuestion')); if (!f) return;
+    d.image = await compressImage(f); cleanup(); showEditor();
+  };
+  $('#edAnsPhoto').onclick = async () => {
+    sync();
+    const f = await pickFile($('#fileAnswer')); if (!f) return;
+    d.answerImage = await compressImage(f); cleanup(); showEditor();
+  };
+  if ($('#edAnsDel')) $('#edAnsDel').onclick = () => { sync(); d.answerImage = null; cleanup(); showEditor(); };
+
+  $('#edSubjects').onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    sync(); d.subjectId = b.dataset.v;
+    const cats = state.settings.subjects.find(s => s.id === d.subjectId).categories;
+    if (!cats.includes(d.category)) d.category = cats[0] || '其他';
+    cleanup(); showEditor();
+  };
+  $('#edCats').onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    d.category = b.dataset.v;
+    $('#edCats').querySelectorAll('.chip').forEach(c => c.classList.toggle('sel', c === b));
+  };
+  $('#edReasons').onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    const r = b.dataset.v, i = d.reasons.indexOf(r);
+    i >= 0 ? d.reasons.splice(i, 1) : d.reasons.push(r);
+    b.classList.toggle('sel', i < 0);
+  };
+  $('#edSave').onclick = async () => {
+    sync();
+    const { isNew, ...q } = d;
+    await dbPut(q);
+    dropUrl(q.id);
+    const idx = state.questions.findIndex(x => x.id === q.id);
+    idx >= 0 ? (state.questions[idx] = q) : state.questions.push(q);
+    cleanup(); closeSheet(); draft = null; render();
+    toast(isNew ? '已保存 ✓' : '已更新 ✓');
+  };
+}
+
+/* ================= 详情 ================= */
+function showDetail(id) {
+  const q = state.questions.find(x => x.id === id); if (!q) return;
+  const ansUrl = q.answerImage ? blobUrl(q.answerImage, q.id + ':ans') : '';
+  openSheet(`
+    <h2>${esc(subjectName(q.subjectId))} · ${esc(q.category)}<button class="icon-btn" id="dtClose">✕</button></h2>
+    <img class="detail-img" src="${blobUrl(q.image, q.id)}">
+    ${q.myAnswer ? `<div class="kv"><small>我的答案</small>${esc(q.myAnswer)}</div>` : ''}
+    <div class="kv"><small>正确答案</small>${esc(q.answer) || '<span style="color:var(--muted)">（未填写）</span>'}
+      ${ansUrl ? `<img class="detail-img" style="margin:8px 0 0" src="${ansUrl}">` : ''}</div>
+    <div class="kv"><small>做错原因</small>${esc([(q.reasons || []).join('、'), q.note].filter(Boolean).join('\n')) || '（未填写）'}</div>
+    ${q.knowledge ? `<div class="kv"><small>知识点</small>${esc(q.knowledge)}</div>` : ''}
+    <div style="color:var(--muted);font-size:12px;margin-bottom:12px">录入于 ${new Date(q.createdAt).toLocaleString()} · 已复习 ${q.reviewCount || 0} 次</div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn ${q.mastered ? '' : 'ok'}" id="dtMaster">${q.mastered ? '↩︎ 标为未掌握' : '✓ 我已掌握'}</button>
+      <button class="btn" id="dtEdit">✎ 编辑</button>
+    </div>
+    <button class="btn danger" style="width:100%" id="dtDel">删除这道错题</button>
+  `);
+  $('#dtClose').onclick = closeSheet;
+  $('#dtMaster').onclick = async () => { q.mastered = !q.mastered; await dbPut(q); closeSheet(); render(); };
+  $('#dtEdit').onclick = () => { draft = { ...q, reasons: [...(q.reasons || [])], isNew: false }; showEditor(); };
+  $('#dtDel').onclick = async () => {
+    if (!confirm('确定删除这道错题吗？删除后不能恢复。')) return;
+    await dbDel(q.id); dropUrl(q.id); dropUrl(q.id + ':ans');
+    state.questions = state.questions.filter(x => x.id !== q.id);
+    closeSheet(); render(); toast('已删除');
+  };
+}
+
+/* ================= 复习模式 ================= */
+$('#btnReview').onclick = () => {
+  const pool = state.questions
+    .filter(q => !q.mastered)
+    .filter(q => state.subject === 'all' || q.subjectId === state.subject)
+    .filter(q => state.category === 'all' || q.category === state.category);
+  if (!pool.length) return toast('当前范围没有待复习的错题 🎉');
+  // 复习次数少、很久没复习的优先，再加一点随机
+  pool.sort((a, b) => ((a.reviewCount || 0) - (b.reviewCount || 0)) || ((a.lastReviewed || 0) - (b.lastReviewed || 0)) || (Math.random() - .5));
+  reviewStep(pool.slice(0, 10), 0);
+};
+
+function reviewStep(list, i) {
+  if (i >= list.length) {
+    openSheet(`<h2>复习完成 🎉</h2><p>本轮复习了 ${list.length} 道错题，继续加油！</p><button class="btn primary" style="width:100%" id="rvDone">好的</button>`);
+    $('#rvDone').onclick = () => { closeSheet(); render(); };
+    return;
+  }
+  const q = list[i];
+  const ansUrl = q.answerImage ? blobUrl(q.answerImage, q.id + ':ans') : '';
+  openSheet(`
+    <h2>复习 ${i + 1} / ${list.length}<button class="icon-btn" id="rvClose">✕</button></h2>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:6px">${esc(subjectName(q.subjectId))} · ${esc(q.category)}${q.knowledge ? ' · ' + esc(q.knowledge) : ''}</div>
+    <img class="detail-img" src="${blobUrl(q.image, q.id)}">
+    <p style="color:var(--muted);font-size:13px">先在草稿纸上重新做一遍，再看答案 ✍️</p>
+    <button class="reveal" id="rvShow">👀 点我查看答案</button>
+    <div id="rvAns" class="hide">
+      <div class="kv"><small>正确答案</small>${esc(q.answer) || '（未填写）'}${ansUrl ? `<img class="detail-img" style="margin:8px 0 0" src="${ansUrl}">` : ''}</div>
+      <div class="kv"><small>上次做错的原因</small>${esc([(q.reasons || []).join('、'), q.note].filter(Boolean).join('\n')) || '（未填写）'}</div>
+      <div class="row">
+        <button class="btn" id="rvAgain">😣 还是不会</button>
+        <button class="btn ok" id="rvGot">😀 做对了</button>
+      </div>
+      <button class="btn" style="width:100%;margin-top:10px;color:var(--ok)" id="rvMaster">⭐ 完全掌握，以后不再复习</button>
+    </div>
+  `);
+  $('#rvClose').onclick = () => { closeSheet(); render(); };
+  $('#rvShow').onclick = () => { $('#rvShow').classList.add('hide'); $('#rvAns').classList.remove('hide'); };
+  // 连续做对 3 次自动标为已掌握；做错则清零
+  const next = async (correct, master) => {
+    q.reviewCount = (q.reviewCount || 0) + 1;
+    q.lastReviewed = Date.now();
+    q.streak = correct ? (q.streak || 0) + 1 : 0;
+    if (master || q.streak >= 3) q.mastered = true;
+    await dbPut(q);
+    reviewStep(list, i + 1);
+  };
+  $('#rvAgain').onclick = () => next(false, false);
+  $('#rvGot').onclick = () => next(true, false);
+  $('#rvMaster').onclick = () => next(true, true);
+}
+
+/* ================= 统计 ================= */
+$('#btnStats').onclick = () => {
+  const qs = state.questions;
+  const bySubj = state.settings.subjects.map(s => {
+    const items = qs.filter(q => q.subjectId === s.id);
+    return { name: s.name, total: items.length, todo: items.filter(q => !q.mastered).length };
+  });
+  const reasonCount = {};
+  qs.forEach(q => (q.reasons || []).forEach(r => reasonCount[r] = (reasonCount[r] || 0) + 1));
+  const reasons = Object.entries(reasonCount).sort((a, b) => b[1] - a[1]);
+  const maxS = Math.max(1, ...bySubj.map(x => x.total));
+  const maxR = Math.max(1, ...reasons.map(x => x[1]));
+  openSheet(`
+    <h2>错题统计<button class="icon-btn" id="stClose">✕</button></h2>
+    <div class="field"><label>各科错题（待攻克 / 总数）</label>
+      ${bySubj.map(s => `<div class="list-item"><span style="width:44px">${esc(s.name)}</span>
+        <div class="grow"><div class="bar" style="width:${s.total / maxS * 100}%"></div></div>
+        <span style="width:60px;text-align:right">${s.todo} / ${s.total}</span></div>`).join('')}
+    </div>
+    <div class="field"><label>最常见的错因</label>
+      ${reasons.length ? reasons.map(([r, n]) => `<div class="list-item"><span style="width:90px">${esc(r)}</span>
+        <div class="grow"><div class="bar" style="width:${n / maxR * 100}%;background:#f5a524"></div></div>
+        <span style="width:30px;text-align:right">${n}</span></div>`).join('') : '<div style="color:var(--muted)">还没有数据</div>'}
+    </div>
+  `);
+  $('#stClose').onclick = closeSheet;
+};
+
+/* ================= 设置：科目 / 类别 / 错因 / 备份 ================= */
+async function saveSettings() { await kvSet('settings', state.settings); render(); }
+
+$('#btnSettings').onclick = showSettings;
+function showSettings() {
+  const { subjects, reasons } = state.settings;
+  openSheet(`
+    <h2>设置<button class="icon-btn" id="seClose">✕</button></h2>
+    <div class="field"><label>科目与类别（点科目可编辑它的类别）</label>
+      ${subjects.map(s => `<div class="list-item">
+        <div class="grow"><b>${esc(s.name)}</b><div style="color:var(--muted);font-size:12px">${s.categories.map(esc).join(' / ')}</div></div>
+        <button class="btn" data-edit-subj="${s.id}">编辑</button></div>`).join('')}
+      <button class="btn" style="width:100%;margin-top:10px" id="seAddSubj">＋ 添加科目</button>
+    </div>
+    <div class="field"><label>错因选项（点 ✕ 删除）</label>
+      <div class="wrap">${reasons.map((r, i) => `<span class="chip sm">${esc(r)} <button data-del-reason="${i}" style="color:var(--muted)">✕</button></span>`).join('')}</div>
+      <div class="row" style="margin-top:8px"><input id="seReason" placeholder="新增错因，如：单位漏写"><button class="btn" style="flex:none" id="seAddReason">添加</button></div>
+    </div>
+    <div class="field"><label>数据备份（数据只保存在本机，换手机或清理浏览器前请先导出）</label>
+      <div class="row"><button class="btn" id="seExport">⬇︎ 导出备份</button><button class="btn" id="seImport">⬆︎ 导入备份</button></div>
+    </div>
+  `);
+  $('#seClose').onclick = closeSheet;
+  $('#sheet').querySelectorAll('[data-edit-subj]').forEach(b => b.onclick = () => showSubjectEditor(b.dataset.editSubj));
+  $('#sheet').querySelectorAll('[data-del-reason]').forEach(b => b.onclick = async () => {
+    reasons.splice(+b.dataset.delReason, 1); await saveSettings(); showSettings();
+  });
+  $('#seAddSubj').onclick = async () => {
+    const name = prompt('科目名称，例如：生物、历史、科学');
+    if (!name?.trim()) return;
+    subjects.push({ id: uid(), name: name.trim(), categories: [...DEFAULT_CATEGORIES] });
+    await saveSettings(); showSettings();
+  };
+  $('#seAddReason').onclick = async () => {
+    const v = $('#seReason').value.trim();
+    if (!v || reasons.includes(v)) return;
+    reasons.push(v); await saveSettings(); showSettings();
+  };
+  $('#seExport').onclick = exportBackup;
+  $('#seImport').onclick = importBackup;
+}
+
+function showSubjectEditor(id) {
+  const s = state.settings.subjects.find(x => x.id === id);
+  const count = state.questions.filter(q => q.subjectId === id).length;
+  openSheet(`
+    <h2>编辑科目<button class="icon-btn" id="sjBack">←</button></h2>
+    <div class="field"><label>科目名称</label><input id="sjName" value="${esc(s.name)}"></div>
+    <div class="field"><label>类别（例如：课本、练习册、单元测试、期中考试）</label>
+      ${s.categories.map((c, i) => `<div class="list-item"><span class="grow">${esc(c)}</span>
+        <button class="btn" data-up="${i}" ${i === 0 ? 'disabled style="opacity:.3"' : ''}>↑</button>
+        <button class="btn danger" data-del="${i}">删除</button></div>`).join('')}
+      <div class="row" style="margin-top:8px"><input id="sjCat" placeholder="新增类别"><button class="btn" style="flex:none" id="sjAddCat">添加</button></div>
+    </div>
+    <button class="btn primary" style="width:100%;margin-bottom:10px" id="sjSave">保存科目名称</button>
+    <button class="btn danger" style="width:100%" id="sjDel">删除这个科目${count ? `（含 ${count} 道错题）` : ''}</button>
+  `);
+  $('#sjBack').onclick = showSettings;
+  $('#sjSave').onclick = async () => { const n = $('#sjName').value.trim(); if (n) { s.name = n; await saveSettings(); } showSettings(); };
+  $('#sjAddCat').onclick = async () => {
+    const v = $('#sjCat').value.trim();
+    if (!v || s.categories.includes(v)) return;
+    s.categories.push(v); await saveSettings(); showSubjectEditor(id);
+  };
+  $('#sheet').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    const c = s.categories[+b.dataset.del];
+    const n = state.questions.filter(q => q.subjectId === id && q.category === c).length;
+    if (n && !confirm(`「${c}」下有 ${n} 道错题，删除类别后它们仍保留，但需要重新归类。确定删除？`)) return;
+    s.categories.splice(+b.dataset.del, 1); await saveSettings(); showSubjectEditor(id);
+  });
+  $('#sheet').querySelectorAll('[data-up]').forEach(b => b.onclick = async () => {
+    const i = +b.dataset.up; if (!i) return;
+    [s.categories[i - 1], s.categories[i]] = [s.categories[i], s.categories[i - 1]];
+    await saveSettings(); showSubjectEditor(id);
+  });
+  $('#sjDel').onclick = async () => {
+    if (!confirm(count ? `删除「${s.name}」会同时删除其中 ${count} 道错题，且不能恢复。确定？` : `确定删除「${s.name}」？`)) return;
+    for (const q of state.questions.filter(q => q.subjectId === id)) { await dbDel(q.id); dropUrl(q.id); dropUrl(q.id + ':ans'); }
+    state.questions = state.questions.filter(q => q.subjectId !== id);
+    state.settings.subjects = state.settings.subjects.filter(x => x.id !== id);
+    if (state.subject === id) state.subject = 'all';
+    await saveSettings(); showSettings();
+  };
+}
+
+async function exportBackup() {
+  toast('正在打包…');
+  const questions = [];
+  for (const q of state.questions) {
+    questions.push({ ...q, image: await blobToDataURL(q.image), answerImage: q.answerImage ? await blobToDataURL(q.answerImage) : null });
+  }
+  const data = JSON.stringify({ app: 'mistake-book', version: 1, exportedAt: Date.now(), settings: state.settings, questions });
+  const blob = new Blob([data], { type: 'application/json' });
+  const name = `错题本备份-${new Date().toISOString().slice(0, 10)}.json`;
+  const file = new File([blob], name, { type: 'application/json' });
+  // 手机上优先用系统分享（可存到文件/微信/网盘），否则直接下载
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+async function importBackup() {
+  const f = await pickFile($('#fileImport')); if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (data.app !== 'mistake-book') throw new Error('不是错题本的备份文件');
+    if (!confirm(`备份里有 ${data.questions.length} 道错题。导入会与现有数据合并（相同的题会被覆盖），继续？`)) return;
+    for (const q of data.questions) {
+      q.image = await dataURLToBlob(q.image);
+      q.answerImage = q.answerImage ? await dataURLToBlob(q.answerImage) : null;
+      await dbPut(q); dropUrl(q.id); dropUrl(q.id + ':ans');
+    }
+    // 合并科目和类别
+    for (const s of data.settings.subjects) {
+      const mine = state.settings.subjects.find(x => x.id === s.id);
+      if (!mine) state.settings.subjects.push(s);
+      else s.categories.forEach(c => mine.categories.includes(c) || mine.categories.push(c));
+    }
+    data.settings.reasons.forEach(r => state.settings.reasons.includes(r) || state.settings.reasons.push(r));
+    await kvSet('settings', state.settings);
+    state.questions = await dbAll();
+    closeSheet(); render(); toast('导入完成 ✓');
+  } catch (err) { alert('导入失败：' + err.message); }
+}
+
+/* ================= 启动 ================= */
+(async function init() {
+  db = await openDB();
+  state.settings = (await kvGet('settings')) || structuredClone(DEFAULT_SETTINGS);
+  state.questions = await dbAll();
+  // 请求持久化存储，降低浏览器自动清理数据的概率
+  navigator.storage?.persist?.();
+  render();
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
+})();
+</script>
+</body>
+</html>
