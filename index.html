@@ -427,16 +427,66 @@ function showDetail(id) {
 }
 
 /* ================= 复习模式 ================= */
+// 复习前先选择范围：科目、类别、题量
+const reviewOpts = { subject: 'all', category: 'all', size: 10, includeMastered: false };
+
 $('#btnReview').onclick = () => {
-  const pool = state.questions
-    .filter(q => !q.mastered)
-    .filter(q => state.subject === 'all' || q.subjectId === state.subject)
-    .filter(q => state.category === 'all' || q.category === state.category);
-  if (!pool.length) return toast('当前范围没有待复习的错题 🎉');
-  // 复习次数少、很久没复习的优先，再加一点随机
-  pool.sort((a, b) => ((a.reviewCount || 0) - (b.reviewCount || 0)) || ((a.lastReviewed || 0) - (b.lastReviewed || 0)) || (Math.random() - .5));
-  reviewStep(pool.slice(0, 10), 0);
+  reviewOpts.subject = state.subject;
+  reviewOpts.category = state.category;
+  showReviewSetup();
 };
+
+function reviewPool(subject = reviewOpts.subject, category = reviewOpts.category) {
+  return state.questions
+    .filter(q => reviewOpts.includeMastered || !q.mastered)
+    .filter(q => subject === 'all' || q.subjectId === subject)
+    .filter(q => category === 'all' || q.category === category);
+}
+
+function showReviewSetup() {
+  const o = reviewOpts;
+  const { subjects } = state.settings;
+  const cats = o.subject === 'all'
+    ? [...new Set(subjects.flatMap(s => s.categories))]
+    : subjects.find(s => s.id === o.subject)?.categories || [];
+  if (o.category !== 'all' && !cats.includes(o.category)) o.category = 'all';
+  const n = reviewPool().length;
+  const count = o.size === 0 ? n : Math.min(o.size, n);
+  const chip = (attr, val, on, label, num) =>
+    `<button class="chip sm ${on ? 'sel' : ''}" ${attr}="${esc(val)}" ${num === 0 ? 'style="opacity:.45"' : ''}>${esc(label)} <span style="color:var(--muted)">${num}</span></button>`;
+  openSheet(`
+    <h2>选择复习内容<button class="icon-btn" id="rsClose">✕</button></h2>
+    <div class="field"><label>复习哪个科目</label><div class="wrap">
+      ${chip('data-rs-subj', 'all', o.subject === 'all', '全部科目', reviewPool('all', 'all').length)}
+      ${subjects.map(s => chip('data-rs-subj', s.id, o.subject === s.id, s.name, reviewPool(s.id, 'all').length)).join('')}
+    </div></div>
+    <div class="field"><label>哪类错题</label><div class="wrap">
+      ${chip('data-rs-cat', 'all', o.category === 'all', '全部类别', reviewPool(o.subject, 'all').length)}
+      ${cats.map(c => chip('data-rs-cat', c, o.category === c, c, reviewPool(o.subject, c).length)).join('')}
+    </div></div>
+    <div class="field"><label>这次复习几道</label><div class="wrap">
+      ${[5, 10, 20, 0].map(v => `<button class="chip sm ${o.size === v ? 'sel' : ''}" data-rs-size="${v}">${v ? v + ' 道' : '全部'}</button>`).join('')}
+    </div></div>
+    <div class="field"><label class="wrap" style="align-items:center;gap:8px;font-weight:400;color:var(--text)">
+      <input type="checkbox" id="rsMastered" style="width:auto" ${o.includeMastered ? 'checked' : ''}> 包括已掌握的题（考前总复习用）
+    </label></div>
+    <button class="btn primary" style="width:100%;padding:14px;${count ? '' : 'opacity:.5'}" id="rsStart" ${count ? '' : 'disabled'}>
+      ${count ? `开始复习（${count} 道）` : '这个范围没有待复习的错题 🎉'}
+    </button>
+  `);
+  $('#rsClose').onclick = closeSheet;
+  $('#sheet').querySelectorAll('[data-rs-subj]').forEach(b => b.onclick = () => { o.subject = b.dataset.rsSubj; o.category = 'all'; showReviewSetup(); });
+  $('#sheet').querySelectorAll('[data-rs-cat]').forEach(b => b.onclick = () => { o.category = b.dataset.rsCat; showReviewSetup(); });
+  $('#sheet').querySelectorAll('[data-rs-size]').forEach(b => b.onclick = () => { o.size = +b.dataset.rsSize; showReviewSetup(); });
+  $('#rsMastered').onchange = e => { o.includeMastered = e.target.checked; showReviewSetup(); };
+  $('#rsStart').onclick = () => {
+    const pool = reviewPool();
+    if (!pool.length) return;
+    // 复习次数少、很久没复习的优先，再加一点随机
+    pool.sort((a, b) => ((a.reviewCount || 0) - (b.reviewCount || 0)) || ((a.lastReviewed || 0) - (b.lastReviewed || 0)) || (Math.random() - .5));
+    reviewStep(o.size ? pool.slice(0, o.size) : pool, 0);
+  };
+}
 
 function reviewStep(list, i) {
   if (i >= list.length) {
