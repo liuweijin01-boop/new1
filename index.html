@@ -80,6 +80,26 @@ main{padding:4px 16px calc(110px + env(safe-area-inset-bottom))}
 .toast{position:fixed;left:50%;top:30%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:10px 18px;border-radius:10px;z-index:50;display:none}
 .reveal{border:2px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--muted);width:100%}
 .hide{display:none!important}
+/* 框选错题 */
+.cropper{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column;color:#fff;user-select:none;-webkit-user-select:none}
+.crop-tip{padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;text-align:center;font-size:14px;color:#ddd}
+.crop-stage{flex:1;position:relative;overflow:hidden;margin:4px 0}
+.crop-wrap{position:absolute;touch-action:none}
+.crop-wrap canvas{width:100%;height:100%;display:block}
+.crop-box{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.6);cursor:move;touch-action:none}
+.crop-box::before,.crop-box::after{content:"";position:absolute;inset:33.33% 0;border-top:1px solid rgba(255,255,255,.35);border-bottom:1px solid rgba(255,255,255,.35);pointer-events:none}
+.crop-box::after{inset:0 33.33%;border:0;border-left:1px solid rgba(255,255,255,.35);border-right:1px solid rgba(255,255,255,.35)}
+.crop-h{position:absolute;width:36px;height:36px;touch-action:none;z-index:1}
+.crop-h::after{content:"";position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;background:#fff;border-radius:50%;box-shadow:0 0 4px rgba(0,0,0,.5)}
+.crop-h[data-h=nw]{left:-18px;top:-18px;cursor:nwse-resize}.crop-h[data-h=ne]{right:-18px;top:-18px;cursor:nesw-resize}
+.crop-h[data-h=sw]{left:-18px;bottom:-18px;cursor:nesw-resize}.crop-h[data-h=se]{right:-18px;bottom:-18px;cursor:nwse-resize}
+.crop-h[data-h=n]{left:50%;top:-18px;margin-left:-18px;cursor:ns-resize}.crop-h[data-h=s]{left:50%;bottom:-18px;margin-left:-18px;cursor:ns-resize}
+.crop-h[data-h=w]{top:50%;left:-18px;margin-top:-18px;cursor:ew-resize}.crop-h[data-h=e]{top:50%;right:-18px;margin-top:-18px;cursor:ew-resize}
+.crop-h[data-h=n]::after,.crop-h[data-h=s]::after{width:26px;height:8px;margin:-4px 0 0 -13px;border-radius:4px}
+.crop-h[data-h=w]::after,.crop-h[data-h=e]::after{width:8px;height:26px;margin:-13px 0 0 -4px;border-radius:4px}
+.crop-bar{display:flex;gap:10px;padding:12px 16px calc(14px + env(safe-area-inset-bottom))}
+.crop-bar button{flex:1;padding:13px 0;border-radius:12px;background:#2a2d35;color:#fff;font-weight:600}
+.crop-bar button.primary{background:var(--primary)}
 </style>
 </head>
 <body>
@@ -117,6 +137,23 @@ main{padding:4px 16px calc(110px + env(safe-area-inset-bottom))}
 <input type="file" id="fileImport" accept="application/json,.json" class="hide">
 
 <div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
+<div class="cropper hide" id="cropper">
+  <div class="crop-tip" id="cropTip">拖动白框的边角，只框住这道错题</div>
+  <div class="crop-stage" id="cropStage">
+    <div class="crop-wrap" id="cropWrap">
+      <div class="crop-box" id="cropBox" data-h="move">
+        <i class="crop-h" data-h="nw"></i><i class="crop-h" data-h="n"></i><i class="crop-h" data-h="ne"></i><i class="crop-h" data-h="e"></i>
+        <i class="crop-h" data-h="se"></i><i class="crop-h" data-h="s"></i><i class="crop-h" data-h="sw"></i><i class="crop-h" data-h="w"></i>
+      </div>
+    </div>
+  </div>
+  <div class="crop-bar">
+    <button id="cropCancel">取消</button>
+    <button id="cropRotate">↻ 旋转</button>
+    <button id="cropFull">全图</button>
+    <button id="cropOk" class="primary">确定</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -193,24 +230,113 @@ function toast(msg) {
   clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = 'none', 1600);
 }
 
-// 压缩照片：最长边 1600px，JPEG 0.82，一张一般 200~400KB
-function compressImage(file, maxSide = 1600, quality = 0.82) {
+/* ================= 框选错题区域 ================= */
+// 打开全屏框选界面，返回裁剪并压缩后的图片；用户取消则返回 null
+function loadImage(file) {
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * scale);
-      c.height = Math.round(img.height * scale);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      c.toBlob(b => b ? resolve(b) : reject(new Error('图片处理失败')), 'image/jpeg', quality);
-    };
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('无法读取图片')); };
     img.src = url;
   });
 }
+
+async function cropImage(file, tip = '拖动白框的边角，只框住这道错题') {
+  const img = await loadImage(file);
+  // 工作画布最长边 2400px，够清晰也不会太卡
+  const scale = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
+  let src = document.createElement('canvas');
+  src.width = Math.round(img.naturalWidth * scale);
+  src.height = Math.round(img.naturalHeight * scale);
+  src.getContext('2d').drawImage(img, 0, 0, src.width, src.height);
+
+  const el = $('#cropper'), stage = $('#cropStage'), wrap = $('#cropWrap'), box = $('#cropBox');
+  let rect = { x: .06, y: .06, w: .88, h: .88 }; // 以图片宽高为 1 的比例坐标
+  let W = 0, H = 0;
+
+  const draw = () => {
+    box.style.left = rect.x * W + 'px'; box.style.top = rect.y * H + 'px';
+    box.style.width = rect.w * W + 'px'; box.style.height = rect.h * H + 'px';
+  };
+  const layout = () => {
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    const k = Math.min((sw - 40) / src.width, (sh - 40) / src.height); // 留边，让角上的拖动点完整露出来
+    W = src.width * k; H = src.height * k;
+    Object.assign(wrap.style, { width: W + 'px', height: H + 'px', left: (sw - W) / 2 + 'px', top: (sh - H) / 2 + 'px' });
+    draw();
+  };
+  const showCanvas = () => { wrap.querySelector('canvas')?.remove(); wrap.prepend(src); layout(); };
+
+  // 拖动：框内移动，边角/边缩放
+  let drag = null;
+  const onDown = e => {
+    const h = e.target.closest('[data-h]'); if (!h) return;
+    e.preventDefault(); e.stopPropagation();
+    h.setPointerCapture?.(e.pointerId);
+    drag = { mode: h.dataset.h, px: e.clientX, py: e.clientY, r: { ...rect }, id: e.pointerId };
+  };
+  const onMove = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = (e.clientX - drag.px) / W, dy = (e.clientY - drag.py) / H, r = drag.r, m = drag.mode;
+    const minW = 40 / W, minH = 40 / H, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    if (m === 'move') {
+      rect.x = clamp(r.x + dx, 0, 1 - r.w); rect.y = clamp(r.y + dy, 0, 1 - r.h);
+    } else {
+      if (m.includes('w')) { rect.x = clamp(r.x + dx, 0, r.x + r.w - minW); rect.w = r.x + r.w - rect.x; }
+      if (m.includes('e')) rect.w = clamp(r.w + dx, minW, 1 - r.x);
+      if (m.includes('n')) { rect.y = clamp(r.y + dy, 0, r.y + r.h - minH); rect.h = r.y + r.h - rect.y; }
+      if (m.includes('s')) rect.h = clamp(r.h + dy, minH, 1 - r.y);
+    }
+    draw();
+  };
+  const onUp = e => { if (drag && e.pointerId === drag.id) drag = null; };
+
+  $('#cropTip').textContent = tip;
+  el.classList.remove('hide');
+  showCanvas();
+  box.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  window.addEventListener('resize', layout);
+
+  return new Promise(resolve => {
+    const finish = result => {
+      el.classList.add('hide');
+      box.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('resize', layout);
+      wrap.querySelector('canvas')?.remove();
+      resolve(result);
+    };
+    $('#cropCancel').onclick = () => finish(null);
+    $('#cropFull').onclick = () => { rect = { x: 0, y: 0, w: 1, h: 1 }; draw(); };
+    $('#cropRotate').onclick = () => {
+      // 顺时针旋转 90°，选框跟着一起转
+      const c = document.createElement('canvas');
+      c.width = src.height; c.height = src.width;
+      const g = c.getContext('2d');
+      g.translate(c.width, 0); g.rotate(Math.PI / 2); g.drawImage(src, 0, 0);
+      src = c;
+      rect = { x: 1 - rect.y - rect.h, y: rect.x, w: rect.h, h: rect.w };
+      showCanvas();
+    };
+    $('#cropOk').onclick = () => {
+      const sx = Math.round(rect.x * src.width), sy = Math.round(rect.y * src.height);
+      const sw = Math.max(1, Math.round(rect.w * src.width)), sh = Math.max(1, Math.round(rect.h * src.height));
+      const k = Math.min(1, 1600 / Math.max(sw, sh));
+      const out = document.createElement('canvas');
+      out.width = Math.round(sw * k); out.height = Math.round(sh * k);
+      const g = out.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, out.width, out.height);
+      g.drawImage(src, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      out.toBlob(b => finish(b), 'image/jpeg', 0.85);
+    };
+  });
+}
+
 const blobToDataURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
 const dataURLToBlob = async d => (await fetch(d)).blob();
 
@@ -290,11 +416,12 @@ $('#btnCamera').onclick = async () => {
   const file = await pickFile($('#fileQuestion'));
   if (!file) return;
   try {
-    const blob = await compressImage(file);
+    const blob = await cropImage(file);
+    if (!blob) return;
     const subjectId = state.subject !== 'all' ? state.subject : state.settings.subjects[0]?.id;
     const cats = state.settings.subjects.find(s => s.id === subjectId)?.categories || [];
     draft = {
-      id: uid(), isNew: true, image: blob, answerImage: null, subjectId,
+      id: uid(), isNew: true, srcImage: file, image: blob, answerImage: null, subjectId,
       category: state.category !== 'all' && cats.includes(state.category) ? state.category : cats[0] || '其他',
       answer: '', myAnswer: '', reasons: [], note: '', knowledge: '',
       createdAt: Date.now(), reviewCount: 0, lastReviewed: null, mastered: false,
@@ -310,7 +437,7 @@ function showEditor() {
   const ansUrl = d.answerImage ? URL.createObjectURL(d.answerImage) : '';
   openSheet(`
     <h2>${d.isNew ? '记录错题' : '编辑错题'}<button class="icon-btn" id="edClose">✕</button></h2>
-    <div class="field"><img class="preview" src="${imgUrl}"><button class="btn" style="width:100%;margin-top:8px" id="edRetake">🔄 重拍题目</button></div>
+    <div class="field"><img class="preview" src="${imgUrl}"><div class="row" style="margin-top:8px"><button class="btn" id="edRecrop">✂️ 重新框选</button><button class="btn" id="edRetake">🔄 重拍题目</button></div></div>
 
     <div class="field"><label>科目</label><div class="wrap" id="edSubjects">
       ${state.settings.subjects.map(s => `<button class="chip sm ${s.id === d.subjectId ? 'sel' : ''}" data-v="${s.id}">${esc(s.name)}</button>`).join('')}
@@ -357,12 +484,20 @@ function showEditor() {
   $('#edRetake').onclick = async () => {
     sync();
     const f = await pickFile($('#fileQuestion')); if (!f) return;
-    d.image = await compressImage(f); cleanup(); showEditor();
+    const b = await cropImage(f); if (!b) return;
+    d.srcImage = f; d.image = b; cleanup(); showEditor();
+  };
+  $('#edRecrop').onclick = async () => {
+    sync();
+    // 新拍的题用原图重新框选；已保存的题只能在现有图片上再框小一点
+    const b = await cropImage(d.srcImage || d.image); if (!b) return;
+    d.image = b; cleanup(); showEditor();
   };
   $('#edAnsPhoto').onclick = async () => {
     sync();
     const f = await pickFile($('#fileAnswer')); if (!f) return;
-    d.answerImage = await compressImage(f); cleanup(); showEditor();
+    const b = await cropImage(f, '拖动白框的边角，框住这道题的答案'); if (!b) return;
+    d.answerImage = b; cleanup(); showEditor();
   };
   if ($('#edAnsDel')) $('#edAnsDel').onclick = () => { sync(); d.answerImage = null; cleanup(); showEditor(); };
 
@@ -386,7 +521,7 @@ function showEditor() {
   };
   $('#edSave').onclick = async () => {
     sync();
-    const { isNew, ...q } = d;
+    const { isNew, srcImage, ...q } = d;
     await dbPut(q);
     dropUrl(q.id);
     const idx = state.questions.findIndex(x => x.id === q.id);
