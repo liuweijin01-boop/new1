@@ -1,5 +1,5 @@
 // 离线缓存：先用网络，失败时用缓存，保证更新能及时生效、断网也能打开
-const CACHE = 'mistake-book-v3';
+const CACHE = 'mistake-book-v4';
 const ASSETS = ['./', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
