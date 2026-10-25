@@ -543,6 +543,10 @@ function showDetail(id) {
       ${ansUrl ? `<img class="detail-img" style="margin:8px 0 0" src="${ansUrl}">` : ''}</div>
     <div class="kv"><small>做错原因</small>${esc([(q.reasons || []).join('、'), q.note].filter(Boolean).join('\n')) || '（未填写）'}</div>
     ${q.knowledge ? `<div class="kv"><small>知识点</small>${esc(q.knowledge)}</div>` : ''}
+    <div class="kv"><small>💡 我的想法（${(q.thoughts || []).length}）</small>${thoughtsHtml(q) || '<span style="color:var(--muted)">复习时有新的体会，可以随时记在这里</span>'}
+      <div class="row" style="margin-top:8px"><input id="dtThought" placeholder="写下新的想法…"><button class="btn primary" style="flex:none" id="dtAddThought">添加</button></div>
+    </div>
+    <button class="btn" style="width:100%;margin-bottom:12px" id="dtPractice">🧩 举一反三练习（${(q.practice || []).length} 道）</button>
     <div style="color:var(--muted);font-size:12px;margin-bottom:12px">录入于 ${new Date(q.createdAt).toLocaleString()} · 已复习 ${q.reviewCount || 0} 次</div>
     <div class="row" style="margin-bottom:10px">
       <button class="btn ${q.mastered ? '' : 'ok'}" id="dtMaster">${q.mastered ? '↩︎ 标为未掌握' : '✓ 我已掌握'}</button>
@@ -551,6 +555,10 @@ function showDetail(id) {
     <button class="btn danger" style="width:100%" id="dtDel">删除这道错题</button>
   `);
   $('#dtClose').onclick = closeSheet;
+  $('#dtAddThought').onclick = async () => {
+    if (await addThought(q, $('#dtThought').value)) { showDetail(q.id); toast('已记下 ✓'); }
+  };
+  $('#dtPractice').onclick = () => showPractice(q, () => showDetail(q.id));
   $('#dtMaster').onclick = async () => { q.mastered = !q.mastered; await dbPut(q); closeSheet(); render(); };
   $('#dtEdit').onclick = () => { draft = { ...q, reasons: [...(q.reasons || [])], isNew: false }; showEditor(); };
   $('#dtDel').onclick = async () => {
@@ -640,6 +648,9 @@ function reviewStep(list, i) {
     <div id="rvAns" class="hide">
       <div class="kv"><small>正确答案</small>${esc(q.answer) || '（未填写）'}${ansUrl ? `<img class="detail-img" style="margin:8px 0 0" src="${ansUrl}">` : ''}</div>
       <div class="kv"><small>上次做错的原因</small>${esc([(q.reasons || []).join('、'), q.note].filter(Boolean).join('\n')) || '（未填写）'}</div>
+      ${(q.thoughts || []).length ? `<div class="kv"><small>💡 之前的想法</small>${thoughtsHtml(q)}</div>` : ''}
+      <div class="field"><textarea id="rvThought" placeholder="这次又有什么新想法？写下来会一起保存（可选）"></textarea></div>
+      <button class="btn" style="width:100%;margin-bottom:10px" id="rvPractice">🧩 举一反三练习（${(q.practice || []).length} 道）</button>
       <div class="row">
         <button class="btn" id="rvAgain">😣 还是不会</button>
         <button class="btn ok" id="rvGot">😀 做对了</button>
@@ -650,7 +661,10 @@ function reviewStep(list, i) {
   $('#rvClose').onclick = () => { closeSheet(); render(); };
   $('#rvShow').onclick = () => { $('#rvShow').classList.add('hide'); $('#rvAns').classList.remove('hide'); };
   // 连续做对 3 次自动标为已掌握；做错则清零
+  const saveThought = () => addThought(q, $('#rvThought').value);
+  $('#rvPractice').onclick = async () => { await saveThought(); showPractice(q, () => reviewStep(list, i)); };
   const next = async (correct, master) => {
+    await saveThought();
     q.reviewCount = (q.reviewCount || 0) + 1;
     q.lastReviewed = Date.now();
     q.streak = correct ? (q.streak || 0) + 1 : 0;
@@ -661,6 +675,150 @@ function reviewStep(list, i) {
   $('#rvAgain').onclick = () => next(false, false);
   $('#rvGot').onclick = () => next(true, false);
   $('#rvMaster').onclick = () => next(true, true);
+}
+
+/* ================= 我的想法 ================= */
+function thoughtsHtml(q) {
+  return (q.thoughts || []).map(t =>
+    `<div style="margin-top:6px"><span style="color:var(--muted);font-size:12px">${fmtDate(t.at)}</span> ${esc(t.text)}</div>`).join('');
+}
+async function addThought(q, text) {
+  text = (text || '').trim();
+  if (!text) return false;
+  (q.thoughts ||= []).push({ at: Date.now(), text });
+  await dbPut(q);
+  return true;
+}
+
+/* ================= 举一反三练习 ================= */
+// 生成发给 AI 的提示词：孩子把它和题目图片一起发给豆包 / DeepSeek / Kimi 等 AI 助手
+function practicePrompt(q) {
+  const lines = [
+    `你是一位耐心的${subjectName(q.subjectId)}老师。图片里是孩子做错的一道题（来源：${q.category}）。`,
+    q.answer ? `正确答案：${q.answer}` : null,
+    q.myAnswer ? `孩子当时的答案：${q.myAnswer}` : null,
+    ((q.reasons || []).length || q.note) ? `做错的原因：${[(q.reasons || []).join('、'), q.note].filter(Boolean).join('；')}` : null,
+    q.knowledge ? `知识点：${q.knowledge}` : null,
+    '',
+    '请针对同一个知识点和同样的易错点，出 3 道难度相近的练习题，帮助孩子巩固。要求：',
+    '1. 不要和原题一模一样，换数字、换情境或换问法；',
+    '2. 每道题后面给出答案和简短解析；',
+    '3. 不要用 LaTeX，用普通文字和符号书写（如 x²、√2、3/4）；',
+    '4. 严格按下面的格式输出，不要输出其他内容：',
+    '【第1题】题目内容',
+    '【答案】答案和解析',
+    '【第2题】题目内容',
+    '【答案】答案和解析',
+    '【第3题】题目内容',
+    '【答案】答案和解析',
+  ];
+  return lines.filter(l => l !== null).join('\n');
+}
+
+// 解析 AI 回复：按【第N题】切分，每段再按【答案】分成题目和答案
+function parsePractice(text) {
+  return text.split(/【\s*第\s*\d+\s*题\s*】/).slice(1).map(chunk => {
+    const [t, ...rest] = chunk.split(/【\s*答案\s*】/);
+    return { text: t.trim(), answer: rest.join('\n').trim() };
+  }).filter(x => x.text);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  }
+}
+
+async function shareImage(q) {
+  const file = new File([q.image], `错题-${subjectName(q.subjectId)}.jpg`, { type: 'image/jpeg' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = blobUrl(q.image, q.id); a.download = file.name; a.click();
+}
+
+function showPractice(q, back) {
+  const items = q.practice || [];
+  openSheet(`
+    <h2>🧩 举一反三<button class="icon-btn" id="prBack">←</button></h2>
+    <p style="color:var(--muted);font-size:13px;margin-top:0">针对这道错题做几道类似的题，检验是不是真的会了。</p>
+    ${items.length ? `<button class="btn primary" style="width:100%;padding:14px;margin-bottom:12px" id="prStart">开始练习（${items.length} 道）</button>` : ''}
+    <div class="field"><label>🤖 让 AI 帮忙出题（免费，用豆包、DeepSeek、Kimi 等 App 都可以）</label>
+      <div class="kv" style="font-size:14px;white-space:normal">
+        ① 点「复制提示词」，再点「保存题目图片」<br>
+        ② 打开 AI App，粘贴提示词，并上传刚才的图片，发送<br>
+        ③ 把 AI 的回答全部复制，粘贴到下面的框里，点「导入」
+      </div>
+      <div class="row" style="margin-bottom:8px"><button class="btn" id="prCopy">📋 复制提示词</button><button class="btn" id="prImg">🖼 保存题目图片</button></div>
+      <textarea id="prPaste" placeholder="把 AI 的回答粘贴到这里，格式是：&#10;【第1题】……&#10;【答案】……"></textarea>
+      <button class="btn" style="width:100%;margin-top:8px" id="prImport">导入练习题</button>
+    </div>
+    <div class="field"><label>✍️ 自己出一道题（爸爸妈妈或老师出的也可以）</label>
+      <textarea id="prText" placeholder="题目"></textarea>
+      <textarea id="prAns" style="margin-top:8px;min-height:50px" placeholder="答案（可选）"></textarea>
+      <button class="btn" style="width:100%;margin-top:8px" id="prAdd">添加这道题</button>
+    </div>
+    ${items.length ? `<div class="field"><label>已有的练习题</label>
+      ${items.map((it, k) => `<div class="list-item"><div class="grow" style="white-space:pre-wrap">${k + 1}. ${esc(it.text)}
+        <div style="color:var(--muted);font-size:12px">做对 ${it.right || 0} 次 · 做错 ${it.wrong || 0} 次</div></div>
+        <button class="btn danger" style="flex:none" data-pr-del="${k}">删除</button></div>`).join('')}
+    </div>` : ''}
+  `);
+  const save = async list => { q.practice = list; await dbPut(q); showPractice(q, back); };
+  $('#prBack').onclick = back;
+  if ($('#prStart')) $('#prStart').onclick = () => practiceStep(q, 0, { right: 0 }, () => showPractice(q, back));
+  $('#prCopy').onclick = async () => toast(await copyText(practicePrompt(q)) ? '提示词已复制 ✓' : '复制失败，请长按手动复制');
+  $('#prImg').onclick = () => shareImage(q);
+  $('#prImport').onclick = async () => {
+    const parsed = parsePractice($('#prPaste').value);
+    if (!parsed.length) return alert('没有识别到题目。请确认粘贴的内容里有「【第1题】」「【答案】」这样的标记。');
+    await save([...items, ...parsed.map(x => ({ id: uid(), ...x, at: Date.now(), right: 0, wrong: 0 }))]);
+    toast(`导入了 ${parsed.length} 道题 ✓`);
+  };
+  $('#prAdd').onclick = async () => {
+    const text = $('#prText').value.trim();
+    if (!text) return toast('先写题目哦');
+    await save([...items, { id: uid(), text, answer: $('#prAns').value.trim(), at: Date.now(), right: 0, wrong: 0 }]);
+    toast('已添加 ✓');
+  };
+  $('#sheet').querySelectorAll('[data-pr-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('删除这道练习题？')) return;
+    await save(items.filter((_, k) => k !== +b.dataset.prDel));
+  });
+}
+
+function practiceStep(q, i, score, done) {
+  const items = q.practice || [];
+  if (i >= items.length) {
+    openSheet(`<h2>练习完成 🎉</h2><p>一共 ${items.length} 道，做对了 <b>${score.right}</b> 道。${score.right === items.length ? '太棒了，这类题已经掌握了！' : '做错的题记得再看看解析哦。'}</p>
+      <button class="btn primary" style="width:100%" id="psDone">返回</button>`);
+    $('#psDone').onclick = done;
+    return;
+  }
+  const it = items[i];
+  openSheet(`
+    <h2>练习 ${i + 1} / ${items.length}<button class="icon-btn" id="psClose">✕</button></h2>
+    <div class="kv" style="font-size:16px">${esc(it.text)}</div>
+    <p style="color:var(--muted);font-size:13px">在草稿纸上做完，再看答案 ✍️</p>
+    <button class="reveal" id="psShow">👀 查看答案</button>
+    <div id="psAns" class="hide">
+      <div class="kv"><small>答案</small>${esc(it.answer) || '（没有填写答案）'}</div>
+      <div class="row"><button class="btn" id="psWrong">😣 做错了</button><button class="btn ok" id="psRight">😀 做对了</button></div>
+    </div>
+  `);
+  $('#psClose').onclick = done;
+  $('#psShow').onclick = () => { $('#psShow').classList.add('hide'); $('#psAns').classList.remove('hide'); };
+  const mark = async right => {
+    right ? it.right = (it.right || 0) + 1 : it.wrong = (it.wrong || 0) + 1;
+    if (right) score.right++;
+    await dbPut(q);
+    practiceStep(q, i + 1, score, done);
+  };
+  $('#psWrong').onclick = () => mark(false);
+  $('#psRight').onclick = () => mark(true);
 }
 
 /* ================= 统计 ================= */
